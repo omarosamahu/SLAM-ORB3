@@ -6,9 +6,11 @@
 #include <opencv2/opencv.hpp>
 // Eigen 
 
+using namespace cv;
+
 
 void pose_estimation_2d2d(std::vector<cv::KeyPoint> keypoints_1, std::vector<cv::KeyPoint> keypoints_2,
-	std::vector<cv::DMatch> matches,cv::Mat R, cv::Mat T) {
+	std::vector<cv::DMatch> matches,cv::Mat& R,cv::Mat& T) {
 	// Note Convert to eigen 
 	//cv::Mat K = (cv::Mat_<double>(3, 3) << 520.9, 0, 325.1, 0, 521.0, 249.7, 0, 0, 1);
 	// Convert the matching points to form the vector 
@@ -35,11 +37,57 @@ void pose_estimation_2d2d(std::vector<cv::KeyPoint> keypoints_1, std::vector<cv:
 	std::cout << "R is " << std::endl << R << std::endl;
 	std::cout << "T is " << std::endl << T << std::endl;
 }
+
+cv::Point2f pixel2cam(const cv::Point2d& p, const cv::Mat& K)
+{
+	return cv::Point2f
+	(
+		(p.x - K.at<double>(0, 2)) / K.at<double>(0, 0),
+		(p.y - K.at<double>(1, 2)) / K.at<double>(1, 1)
+	);
+}
+void trangulation(const std::vector<cv::KeyPoint>& keypoint_1,
+	const std::vector<cv::KeyPoint>& keypoint_2,
+	const std::vector<cv::DMatch>& matches,
+	const cv::Mat& R, const cv::Mat& T, std::vector<cv::Point3d>& points) {
+	cv::Mat T1 = (cv::Mat_<float>(3, 4) <<
+		1, 0, 0, 0,
+		0, 1, 0, 0,
+		0, 0, 1, 0);
+	cv::Mat T2 = (cv::Mat_<float>(3, 4) <<
+		R.at<double>(0, 0), R.at<double>(0, 1), R.at<double>(0, 2), T.at<double>(0, 0),
+		R.at<double>(1, 0), R.at<double>(1, 1), R.at<double>(1, 2), T.at<double>(1, 0),
+		R.at<double>(2, 0), R.at<double>(2, 1), R.at<double>(2, 2), T.at<double>(2, 0)
+		);
+	cv::Mat K = (cv::Mat_<double>(3, 3) << 520.9, 0, 325.1,
+										   0, 521.0, 249.7, 
+										   0, 0, 1);
+	std::vector<cv::Point2f> pts_1, pts_2;
+	for (cv::DMatch m : matches) {
+		// Convert pixel coordinate to camera coordinate
+		pts_1.push_back(pixel2cam(keypoint_1[m.queryIdx].pt, K));
+		pts_2.push_back(pixel2cam(keypoint_2[m.trainIdx].pt, K));
+	}
+	cv::Mat pts_4d;
+	cv::triangulatePoints(T1, T2, pts_1, pts_2, pts_4d);
+
+	for (int i = 0; i < pts_4d.cols; i++) {
+		cv::Mat x = pts_4d.col(i);
+		x /= x.at<float>(3, 0);
+		cv::Point3d p(
+			x.at<float>(0, 0),
+			x.at<float>(1, 0),
+			x.at<float>(2, 0));
+		points.push_back(p);
+	}
+}
+
+
 int main() {
 	std::cout << "ORB Feature Extractor ...........\n";
 	// Load images 
 	auto img1 = cv::imread("E:\\SLAM_Book\\projects\\NonLinear_optimization\\src\\FeatureExtraction\\resources\\1.png",cv::IMREAD_COLOR);
-	auto img2 = cv::imread("E:\\SLAM_Book\\projects\\NonLinear_optimization\\src\\FeatureExtraction\\resources\\1.png",cv::IMREAD_COLOR);
+	auto img2 = cv::imread("E:\\SLAM_Book\\projects\\NonLinear_optimization\\src\\FeatureExtraction\\resources\\2.png",cv::IMREAD_COLOR);
 	// Initialization
 	// Define your keypoints for each image
 	std::vector<cv::KeyPoint> keypoints_1, keypoints_2;
@@ -94,6 +142,13 @@ int main() {
 	auto time_takes= std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
 	std::cout << "Pose Estimation time takes: " << time_takes.count() << "\n";
 	/*************************************************************/
+	/***********Trangulation**********/
+	std::vector<cv::Point3d> points;
+	
+	trangulation(keypoints_1, keypoints_2, matches, R, T, points);
+	for (auto p : points) {
+		std::cout << "Point coordinate: " << p.x << "," << p.y << "," << p.z << "\n";
+	}
 	/*cv::Mat imgMatch;
 	cv::Mat imgGoodMatches;
 	
@@ -108,3 +163,4 @@ int main() {
 	*/
 	cv::waitKey(0);
 }
+
